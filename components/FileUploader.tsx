@@ -69,12 +69,13 @@ export const FileUploader: React.FC<FileUploaderProps> = ({
             {files.map((f, i) => {
               // Check for custom metadata added by templateStorage
               const addedBy = (f as any)._addedBy;
+              const isSystem = (f as any)._isSystem;
               const isShared = !!addedBy;
 
               return (
-                <li key={i} className="flex items-center justify-between bg-white p-3 rounded-lg border border-slate-200 shadow-sm hover:shadow-md transition-shadow">
+                <li key={i} className={`flex items-center justify-between bg-white p-3 rounded-lg border shadow-sm hover:shadow-md transition-shadow ${isSystem ? 'border-purple-200 bg-purple-50/50' : 'border-slate-200'}`}>
                   <div className="flex items-center gap-3 overflow-hidden">
-                    <span className={`w-8 h-8 flex-shrink-0 flex items-center justify-center rounded text-xs font-bold uppercase ${isShared ? 'bg-purple-100 text-purple-600' : 'bg-indigo-100 text-indigo-600'}`}>
+                    <span className={`w-8 h-8 flex-shrink-0 flex items-center justify-center rounded text-xs font-bold uppercase ${isSystem ? 'bg-purple-100 text-purple-600' : 'bg-indigo-100 text-indigo-600'}`}>
                         {f.name.split('.').pop()?.slice(0, 3)}
                     </span>
                     <div className="flex flex-col min-w-0">
@@ -86,19 +87,23 @@ export const FileUploader: React.FC<FileUploaderProps> = ({
                         {isShared && (
                           <>
                             <span>•</span>
-                            <span className="text-purple-500 font-medium">By {addedBy}</span>
+                            <span className={`${isSystem ? 'text-purple-600 font-bold' : 'text-purple-500 font-medium'}`}>
+                              {isSystem ? 'Shared Library' : `By ${addedBy}`}
+                            </span>
                           </>
                         )}
                       </div>
                     </div>
                   </div>
-                  <button 
-                    onClick={() => onRemove(i)}
-                    className="text-slate-300 hover:text-red-500 transition-colors p-1"
-                    title="Remove file"
-                  >
-                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
-                  </button>
+                  {!isSystem && (
+                    <button 
+                      onClick={() => onRemove(i)}
+                      className="text-slate-300 hover:text-red-500 transition-colors p-1"
+                      title="Remove file"
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+                    </button>
+                  )}
                 </li>
               );
             })}

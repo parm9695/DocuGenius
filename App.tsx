@@ -21,7 +21,11 @@ import {
   User as UserIcon,
   LogIn,
   Save,
-  Cloud
+  Cloud,
+  Download,
+  Upload,
+  Share2,
+  RefreshCw
 } from 'lucide-react';
 
 // --- Types for Auth ---
@@ -49,22 +53,28 @@ export default function App() {
   const [isLoadingTemplates, setIsLoadingTemplates] = useState(false);
   
   const logsEndRef = useRef<HTMLDivElement>(null);
+  const importInputRef = useRef<HTMLInputElement>(null);
 
   // --- Load Templates on Mount ---
-  useEffect(() => {
-    const loadTemplates = async () => {
-      setIsLoadingTemplates(true);
-      try {
-        const savedTemplates = await templateStorage.getAllTemplates();
-        if (savedTemplates.length > 0) {
-          setReferenceFiles(savedTemplates);
-        }
-      } catch (e) {
-        console.error("Failed to load templates", e);
-      } finally {
-        setIsLoadingTemplates(false);
+  const loadTemplates = async () => {
+    setIsLoadingTemplates(true);
+    try {
+      // 1. Try to load shared library from server (default-library.json)
+      await templateStorage.loadSharedLibrary();
+      
+      // 2. Load all templates from local DB (including the newly fetched shared ones)
+      const savedTemplates = await templateStorage.getAllTemplates();
+      if (savedTemplates.length > 0) {
+        setReferenceFiles(savedTemplates);
       }
-    };
+    } catch (e) {
+      console.error("Failed to load templates", e);
+    } finally {
+      setIsLoadingTemplates(false);
+    }
+  };
+
+  useEffect(() => {
     loadTemplates();
   }, []);
 
@@ -89,7 +99,6 @@ export default function App() {
     setUser(null);
     setResult(null);
     setTargetFile(null);
-    // We do NOT clear referenceFiles on logout, as they are shared/global on the device
     setLogs([]);
     setUsernameInput('');
     setError(null);
@@ -119,7 +128,7 @@ export default function App() {
   const handleReferenceSelect = async (files: File[]) => {
     if (!user) return;
     
-    // Optimistically update UI first (optional, but here we wait for DB to ensure consistency)
+    // Optimistically update UI first
     const newFiles: File[] = [];
 
     for (const file of files) {
@@ -129,7 +138,6 @@ export default function App() {
         newFiles.push(savedFile);
       } catch (e) {
         console.error(`Failed to save template ${file.name}`, e);
-        // Fallback: just add the file to state without ID (won't persist next reload)
         newFiles.push(file);
       }
     }
@@ -152,11 +160,48 @@ export default function App() {
     setReferenceFiles(prev => prev.filter((_, i) => i !== index));
   };
 
+  const handleExportLibrary = async () => {
+    try {
+      const json = await templateStorage.exportLibrary();
+      const blob = new Blob([json], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'default-library.json'; // Suggested name for re-uploading
+      a.click();
+      URL.revokeObjectURL(url);
+      alert("Library exported! \n\nTo share with everyone: \n1. Rename file to 'default-library.json' \n2. Place it in your project's 'public' folder \n3. Deploy to Vercel.");
+    } catch (e) {
+      alert('Failed to export library');
+    }
+  };
+
+  const handleImportLibrary = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!e.target.files?.length || !user) return;
+    const file = e.target.files[0];
+    const reader = new FileReader();
+    reader.onload = async (event) => {
+      try {
+        setIsLoadingTemplates(true);
+        const json = event.target?.result as string;
+        await templateStorage.importLibrary(json, user.username);
+        // Reload all
+        const all = await templateStorage.getAllTemplates();
+        setReferenceFiles(all);
+      } catch (err) {
+        alert('Invalid library file');
+      } finally {
+        setIsLoadingTemplates(false);
+      }
+    };
+    reader.readAsText(file);
+    e.target.value = ''; // reset
+  };
+
   const addLog = (message: string) => {
     setLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] ${message}`]);
   };
 
-  // Auto-scroll logs
   useEffect(() => {
     logsEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [logs]);
@@ -164,7 +209,6 @@ export default function App() {
   const runAnalysis = async () => {
     if (!targetFile) return;
 
-    // Check API Key from User Object
     const keyToUse = user?.apiKey || process.env.API_KEY;
 
     if (!keyToUse) {
@@ -190,11 +234,10 @@ export default function App() {
     }
   };
 
-  // --- Login Screen Render ---
+  // --- Login Screen ---
   if (!user) {
     return (
       <div className="min-h-screen bg-[#0f172a] flex items-center justify-center p-4 relative overflow-hidden">
-        {/* Background blobs */}
         <div className="absolute top-[-10%] left-[-10%] w-96 h-96 bg-indigo-600/20 rounded-full blur-[100px]"></div>
         <div className="absolute bottom-[-10%] right-[-10%] w-96 h-96 bg-blue-600/20 rounded-full blur-[100px]"></div>
 
@@ -243,7 +286,7 @@ export default function App() {
     );
   }
 
-  // --- Main App Render ---
+  // --- Main App ---
   return (
     <div className="min-h-screen bg-[#0f172a] text-slate-200 pb-20 font-sans relative">
       {/* Header */}
@@ -258,7 +301,6 @@ export default function App() {
             </div>
           </div>
           <div className="flex items-center gap-4">
-            {/* User Profile Info */}
             <div className="hidden md:flex flex-col items-end mr-2">
                 <span className="text-sm font-medium text-white">{user.username}</span>
                 <span className="text-xs text-slate-400">
@@ -273,7 +315,6 @@ export default function App() {
                   ? 'bg-green-500/10 text-green-400 border-green-500/50 hover:bg-green-500/20' 
                   : 'bg-indigo-500/10 text-indigo-400 border-indigo-500/50 hover:bg-indigo-500/20 animate-pulse-border'
                 }`}
-              title="Manage API Key"
             >
               <Key className="w-4 h-4" />
               <span className="hidden sm:inline">{user.apiKey ? 'Key Configured' : 'Set API Key'}</span>
@@ -295,7 +336,7 @@ export default function App() {
       {/* API Key Modal */}
       {showKeyModal && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
-          <div className="bg-[#1e293b] border border-slate-700 rounded-xl p-6 w-full max-w-md shadow-2xl transform transition-all scale-100">
+          <div className="bg-[#1e293b] border border-slate-700 rounded-xl p-6 w-full max-w-md shadow-2xl">
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-lg font-bold text-white flex items-center gap-2">
                 <Settings className="w-5 h-5 text-indigo-400" />
@@ -309,11 +350,6 @@ export default function App() {
             <p className="text-slate-400 text-sm mb-4">
               Setting key for user: <strong className="text-white">{user.username}</strong>
             </p>
-            <p className="text-slate-500 text-xs mb-4">
-              <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noreferrer" className="text-indigo-400 hover:underline font-medium">
-                Get a free API key from Google AI Studio
-              </a>
-            </p>
             
             <div className="mb-6">
               <div className="relative">
@@ -321,33 +357,22 @@ export default function App() {
                 <input 
                   type="password" 
                   defaultValue={user.apiKey || ''}
-                  onChange={(e) => {
-                      // Just local input state, saving happens on button click
-                  }}
-                  onBlur={(e) => {
-                      // Optional: could validate here
-                  }}
-                  ref={(input) => { if (input && !user.apiKey) input.focus() }} // Auto focus if empty
                   placeholder="AIzaSy..."
-                  className="w-full bg-[#0f172a] border border-slate-600 rounded-lg pl-10 pr-4 py-3 text-white text-sm focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none transition-all placeholder:text-slate-600"
+                  className="w-full bg-[#0f172a] border border-slate-600 rounded-lg pl-10 pr-4 py-3 text-white text-sm focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none"
                 />
               </div>
             </div>
             
             <div className="flex justify-end gap-3">
-              <button 
-                onClick={() => setShowKeyModal(false)} 
-                className="px-4 py-2 text-slate-300 hover:text-white text-sm font-medium"
-              >
+              <button onClick={() => setShowKeyModal(false)} className="px-4 py-2 text-slate-300 hover:text-white text-sm font-medium">
                 Cancel
               </button>
               <button 
                 onClick={(e) => {
-                    // Find the input value relative to this button to avoid extra state
                     const input = e.currentTarget.parentElement?.previousElementSibling?.querySelector('input') as HTMLInputElement;
                     handleSaveKey(input.value);
                 }} 
-                className="px-6 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-sm font-bold shadow-lg shadow-indigo-500/20 transition-all"
+                className="px-6 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-sm font-bold shadow-lg"
               >
                 Save Key
               </button>
@@ -358,28 +383,54 @@ export default function App() {
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         
-        {/* Input Section */}
         <div className={`grid grid-cols-1 lg:grid-cols-12 gap-8 mb-12 transition-all duration-500 ${result ? 'hidden' : 'block'}`}>
           
           {/* Reference Library */}
           <div className="lg:col-span-4 space-y-4">
             <div className="bg-[#1e293b] p-6 rounded-2xl shadow-xl border border-slate-700 h-full flex flex-col">
-              <div className="flex items-center gap-2 mb-4 text-indigo-400">
-                <Library className="w-5 h-5" />
-                <h2 className="text-lg font-semibold text-white">Reference Library</h2>
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-2 text-indigo-400">
+                  <Library className="w-5 h-5" />
+                  <h2 className="text-lg font-semibold text-white">Reference Library</h2>
+                </div>
+                <div className="flex items-center gap-1">
+                  <button 
+                    onClick={loadTemplates}
+                    className="p-2 text-slate-400 hover:text-white hover:bg-slate-700 rounded-lg transition-colors"
+                    title="Refresh Library from Server"
+                  >
+                    <RefreshCw className="w-4 h-4" />
+                  </button>
+                  <button 
+                    onClick={handleExportLibrary}
+                    className="p-2 text-slate-400 hover:text-white hover:bg-slate-700 rounded-lg transition-colors"
+                    title="Export Library to JSON (Rename to default-library.json for sharing)"
+                  >
+                    <Download className="w-4 h-4" />
+                  </button>
+                  <button 
+                    onClick={() => importInputRef.current?.click()}
+                    className="p-2 text-slate-400 hover:text-white hover:bg-slate-700 rounded-lg transition-colors"
+                    title="Import Library from JSON"
+                  >
+                    <Upload className="w-4 h-4" />
+                  </button>
+                  <input type="file" ref={importInputRef} className="hidden" accept=".json" onChange={handleImportLibrary} />
+                </div>
               </div>
+              
               <div className="bg-indigo-500/10 border border-indigo-500/20 rounded-lg p-3 mb-6">
                  <div className="flex items-start gap-2">
-                    <Cloud className="w-4 h-4 text-indigo-400 mt-0.5 flex-shrink-0" />
-                    <p className="text-xs text-indigo-200">
-                      <strong>Shared Library:</strong> Files uploaded here are saved to this device's storage. Anyone logging in on this browser can use them as templates.
+                    <Share2 className="w-4 h-4 text-indigo-400 mt-0.5 flex-shrink-0" />
+                    <p className="text-xs text-indigo-200 leading-relaxed">
+                      <strong>Shared Library:</strong> To share templates with your team, export the library, rename it to <code>default-library.json</code>, put it in the <code>public</code> folder of your project code, and deploy.
                     </p>
                  </div>
               </div>
               
               {isLoadingTemplates ? (
                  <div className="flex-1 flex items-center justify-center text-slate-500 text-sm animate-pulse">
-                    Loading library...
+                    Checking for shared templates...
                  </div>
               ) : (
                 <FileUploader 
@@ -435,7 +486,7 @@ export default function App() {
           </div>
         </div>
 
-        {/* Terminal / Status Log View */}
+        {/* Logs & Results Section */}
         {(isAnalyzing || (logs.length > 0 && !result)) && (
           <div className="max-w-3xl mx-auto mb-12 animate-fade-in">
             <div className="bg-[#0d1117] rounded-xl border border-slate-700 shadow-2xl overflow-hidden font-mono text-sm">
@@ -451,12 +502,6 @@ export default function App() {
                     <span>{log}</span>
                   </div>
                 ))}
-                {isAnalyzing && (
-                  <div className="flex gap-2 text-indigo-400">
-                     <span className="text-slate-600 shrink-0">$</span>
-                     <span className="animate-pulse">_</span>
-                  </div>
-                )}
                 <div ref={logsEndRef} />
               </div>
             </div>
@@ -471,7 +516,6 @@ export default function App() {
           </div>
         )}
 
-        {/* Results Section */}
         {result && !isAnalyzing && (
           <div className="space-y-6 animate-fade-in">
             <div className="flex items-center justify-between">
@@ -488,7 +532,7 @@ export default function App() {
 
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 h-[calc(100vh-200px)]">
               
-              {/* Left Sidebar: Summary */}
+              {/* Sidebar */}
               <div className="lg:col-span-3 space-y-6 h-full overflow-y-auto pr-2">
                 <div className="bg-[#1e293b] p-5 rounded-xl border border-slate-700 shadow-lg">
                    <h3 className="text-sm font-bold text-slate-300 uppercase tracking-wider mb-4">Analysis Report</h3>
@@ -515,41 +559,34 @@ export default function App() {
                             <div className="text-xs text-green-200 mt-1 truncate">
                               {result.summary.matchedTemplate.templateName}
                             </div>
-                            <div className="text-[10px] text-green-300/70 mt-1 leading-tight">
-                              {result.summary.matchedTemplate.reasoning}
-                            </div>
                           </div>
                         ) : (
                           <div className="mt-1 bg-slate-800 border border-slate-700 rounded-lg p-3">
                             <div className="text-slate-400 text-xs font-medium">No Template Match</div>
-                            <div className="text-[10px] text-slate-500 mt-1 leading-tight">
-                              Generated new structure from scratch.
-                            </div>
                           </div>
                         )}
                       </div>
                    </div>
                 </div>
                 
-                {/* Tabs for Mobile (or if sidebar is preferred) */}
                 <div className="flex flex-col gap-2">
                   <button 
                     onClick={() => setActiveTab('pdf')}
-                    className={`text-left px-4 py-3 rounded-xl transition-all flex items-center gap-3 ${activeTab === 'pdf' ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-900/20' : 'bg-[#1e293b] text-slate-400 hover:bg-[#2d3b4f]'}`}
+                    className={`text-left px-4 py-3 rounded-xl transition-all flex items-center gap-3 ${activeTab === 'pdf' ? 'bg-indigo-600 text-white' : 'bg-[#1e293b] text-slate-400 hover:bg-[#2d3b4f]'}`}
                   >
                     <FileText className="w-4 h-4" />
                     <span className="font-medium">pdfmake Config</span>
                   </button>
                   <button 
                     onClick={() => setActiveTab('excel')}
-                    className={`text-left px-4 py-3 rounded-xl transition-all flex items-center gap-3 ${activeTab === 'excel' ? 'bg-green-600 text-white shadow-lg shadow-green-900/20' : 'bg-[#1e293b] text-slate-400 hover:bg-[#2d3b4f]'}`}
+                    className={`text-left px-4 py-3 rounded-xl transition-all flex items-center gap-3 ${activeTab === 'excel' ? 'bg-green-600 text-white' : 'bg-[#1e293b] text-slate-400 hover:bg-[#2d3b4f]'}`}
                   >
                     <Code2 className="w-4 h-4" />
                     <span className="font-medium">ExcelJS Script</span>
                   </button>
                   <button 
                     onClick={() => setActiveTab('data')}
-                    className={`text-left px-4 py-3 rounded-xl transition-all flex items-center gap-3 ${activeTab === 'data' ? 'bg-blue-600 text-white shadow-lg shadow-blue-900/20' : 'bg-[#1e293b] text-slate-400 hover:bg-[#2d3b4f]'}`}
+                    className={`text-left px-4 py-3 rounded-xl transition-all flex items-center gap-3 ${activeTab === 'data' ? 'bg-blue-600 text-white' : 'bg-[#1e293b] text-slate-400 hover:bg-[#2d3b4f]'}`}
                   >
                     <Database className="w-4 h-4" />
                     <span className="font-medium">Extracted JSON</span>
@@ -557,7 +594,7 @@ export default function App() {
                 </div>
               </div>
 
-              {/* Right: Editor Area */}
+              {/* Editor */}
               <div className="lg:col-span-9 h-full">
                  {activeTab === 'pdf' && (
                     <CodeBlock 
@@ -588,5 +625,3 @@ export default function App() {
     </div>
   );
 }
-
-
