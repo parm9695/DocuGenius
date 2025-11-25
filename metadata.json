@@ -1,4 +1,5 @@
 {
   "name": "DocuGenius - Universal Layout Converter",
-  "description": "Analyzes PDF, Excel, and Images against a reference library to generate precise pdfmake and ExcelJS code."
+  "description": "Analyzes PDF, Excel, and Images against a reference library to generate precise pdfmake and ExcelJS code.",
+  "requestFramePermissions": []
 }

@@ -3,8 +3,10 @@ import React, { useState, useRef, useEffect } from 'react';
 import { FileUploader } from './components/FileUploader';
 import { analyzeDocument } from './services/geminiService';
 import { templateStorage, TemplateFile } from './services/templateStorage';
+import { secureStorage } from './services/secureStorage';
 import { AnalysisResult } from './types';
 import { CodeBlock } from './components/CodeBlock';
+import packageJson from './package.json'; // Import version from package.json
 import { 
   FileText, 
   Library, 
@@ -25,8 +27,14 @@ import {
   Download,
   Upload,
   Share2,
-  RefreshCw
+  RefreshCw,
+  Braces,
+  Copy,
+  Tag
 } from 'lucide-react';
+
+// --- Configuration ---
+const APP_VERSION = `v${packageJson.version}`;
 
 // --- Types for Auth ---
 interface User {
@@ -40,7 +48,10 @@ export default function App() {
   const [usernameInput, setUsernameInput] = useState('');
   
   // --- App State ---
+  const [inputType, setInputType] = useState<'file' | 'json'>('file');
   const [targetFile, setTargetFile] = useState<File | null>(null);
+  const [jsonInput, setJsonInput] = useState('');
+  
   const [referenceFiles, setReferenceFiles] = useState<File[]>([]);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [logs, setLogs] = useState<string[]>([]);
@@ -85,9 +96,9 @@ export default function App() {
 
     const username = usernameInput.trim().toLowerCase();
     
-    // Check if this user has a saved key in localStorage
+    // Check if this user has a saved key in localStorage (Decrypted via secureStorage)
     const storageKey = `docugenius_user_${username}`;
-    const savedApiKey = localStorage.getItem(storageKey);
+    const savedApiKey = secureStorage.getItem(storageKey);
 
     setUser({
       username: usernameInput.trim(), // Keep original casing for display
@@ -99,6 +110,7 @@ export default function App() {
     setUser(null);
     setResult(null);
     setTargetFile(null);
+    setJsonInput('');
     setLogs([]);
     setUsernameInput('');
     setError(null);
@@ -110,9 +122,9 @@ export default function App() {
     const cleanKey = key.trim();
     // Update local state
     setUser({ ...user, apiKey: cleanKey });
-    // Update persistent storage for this specific user
+    // Update persistent storage for this specific user (Encrypted)
     const storageKey = `docugenius_user_${user.username.toLowerCase()}`;
-    localStorage.setItem(storageKey, cleanKey);
+    secureStorage.setItem(storageKey, cleanKey);
     
     setShowKeyModal(false);
   };
@@ -206,8 +218,25 @@ export default function App() {
     logsEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [logs]);
 
+  const loadSampleJson = () => {
+    const sample = [
+      { id: 1, name: "John Doe", role: "Software Engineer", department: "IT", salary: 85000 },
+      { id: 2, name: "Jane Smith", role: "Project Manager", department: "Operations", salary: 92000 },
+      { id: 3, name: "Bob Johnson", role: "Designer", department: "Creative", salary: 78000 }
+    ];
+    setJsonInput(JSON.stringify(sample, null, 2));
+  };
+
   const runAnalysis = async () => {
-    if (!targetFile) return;
+    // Validation
+    if (inputType === 'file' && !targetFile) {
+        alert("Please upload a file first.");
+        return;
+    }
+    if (inputType === 'json' && !jsonInput.trim()) {
+        alert("Please enter some JSON data.");
+        return;
+    }
 
     const keyToUse = user?.apiKey || process.env.API_KEY;
 
@@ -223,7 +252,12 @@ export default function App() {
     addLog("Starting analysis session...");
 
     try {
-      const data = await analyzeDocument(keyToUse, targetFile, referenceFiles, addLog);
+      // Construct the target object based on current mode
+      const target = inputType === 'file' 
+        ? { type: 'file' as const, file: targetFile! }
+        : { type: 'json' as const, data: jsonInput };
+
+      const data = await analyzeDocument(keyToUse, target, referenceFiles, addLog);
       setResult(data);
     } catch (err: any) {
       const errorMsg = err.message || "An error occurred during analysis.";
@@ -248,6 +282,7 @@ export default function App() {
              </div>
              <h1 className="text-3xl font-bold text-white tracking-tight mb-2">DocuGenius</h1>
              <p className="text-slate-400">Universal Layout Converter</p>
+             <p className="text-xs text-slate-600 mt-2 font-mono">{APP_VERSION}</p>
            </div>
 
            <form onSubmit={handleLogin} className="space-y-6">
@@ -288,7 +323,7 @@ export default function App() {
 
   // --- Main App ---
   return (
-    <div className="min-h-screen bg-[#0f172a] text-slate-200 pb-20 font-sans relative">
+    <div className="min-h-screen bg-[#0f172a] text-slate-200 pb-20 font-sans relative flex flex-col">
       {/* Header */}
       <header className="bg-[#1e293b] border-b border-slate-700 sticky top-0 z-10 shadow-lg">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
@@ -296,8 +331,13 @@ export default function App() {
             <div className="bg-indigo-500 p-2 rounded-lg">
               <FileText className="w-6 h-6 text-white" />
             </div>
-            <div>
-              <h1 className="text-xl font-bold text-white tracking-tight hidden sm:block">DocuGenius</h1>
+            <div className="flex flex-col">
+              <div className="flex items-center gap-2">
+                <h1 className="text-xl font-bold text-white tracking-tight hidden sm:block">DocuGenius</h1>
+                <span className="px-2 py-0.5 rounded bg-slate-700 text-slate-300 text-[10px] font-mono font-bold border border-slate-600">
+                  {APP_VERSION}
+                </span>
+              </div>
             </div>
           </div>
           <div className="flex items-center gap-4">
@@ -361,6 +401,9 @@ export default function App() {
                   className="w-full bg-[#0f172a] border border-slate-600 rounded-lg pl-10 pr-4 py-3 text-white text-sm focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none"
                 />
               </div>
+              <p className="text-xs text-slate-500 mt-2">
+                Your key is encrypted before being saved to this browser's storage.
+              </p>
             </div>
             
             <div className="flex justify-end gap-3">
@@ -381,7 +424,7 @@ export default function App() {
         </div>
       )}
 
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 flex-grow w-full">
         
         <div className={`grid grid-cols-1 lg:grid-cols-12 gap-8 mb-12 transition-all duration-500 ${result ? 'hidden' : 'block'}`}>
           
@@ -446,34 +489,79 @@ export default function App() {
             </div>
           </div>
 
-          {/* Target File & Action */}
+          {/* Target File / Data */}
           <div className="lg:col-span-8 space-y-6">
             <div className="bg-[#1e293b] p-6 rounded-2xl shadow-xl border border-slate-700">
-              <div className="flex items-center gap-2 mb-4 text-indigo-400">
-                <FileType className="w-5 h-5" />
-                <h2 className="text-lg font-semibold text-white">Target File</h2>
+              <div className="flex items-center justify-between mb-6">
+                <div className="flex items-center gap-2 text-indigo-400">
+                  {inputType === 'file' ? <FileType className="w-5 h-5" /> : <Braces className="w-5 h-5" />}
+                  <h2 className="text-lg font-semibold text-white">Target Source</h2>
+                </div>
+                
+                {/* Input Type Tabs */}
+                <div className="flex bg-[#0f172a] p-1 rounded-lg border border-slate-700">
+                  <button
+                    onClick={() => setInputType('file')}
+                    className={`px-4 py-1.5 rounded-md text-xs font-bold transition-all flex items-center gap-2 ${inputType === 'file' ? 'bg-slate-700 text-white shadow-sm' : 'text-slate-400 hover:text-white'}`}
+                  >
+                    <FileType className="w-3.5 h-3.5" /> Document File
+                  </button>
+                  <button
+                    onClick={() => setInputType('json')}
+                    className={`px-4 py-1.5 rounded-md text-xs font-bold transition-all flex items-center gap-2 ${inputType === 'json' ? 'bg-slate-700 text-white shadow-sm' : 'text-slate-400 hover:text-white'}`}
+                  >
+                    <Braces className="w-3.5 h-3.5" /> Sample Data (JSON)
+                  </button>
+                </div>
               </div>
-              <p className="text-sm text-slate-400 mb-6">
-                Upload the document you want to convert to code.
-              </p>
 
               <div className="flex flex-col gap-6">
-                <FileUploader 
-                  label="Upload Target Document"
-                  subLabel="Drag & drop your file here"
-                  files={targetFile ? [targetFile] : []}
-                  onFileSelect={handleTargetSelect}
-                  onRemove={() => setTargetFile(null)}
-                  multiple={false}
-                  icon={<FileText className="w-8 h-8 text-indigo-400" />}
-                />
+                {inputType === 'file' ? (
+                  <>
+                    <p className="text-sm text-slate-400 -mt-2">
+                      Upload the document (PDF, Excel, Image) you want to convert to code.
+                    </p>
+                    <FileUploader 
+                      label="Upload Target Document"
+                      subLabel="Drag & drop your file here"
+                      files={targetFile ? [targetFile] : []}
+                      onFileSelect={handleTargetSelect}
+                      onRemove={() => setTargetFile(null)}
+                      multiple={false}
+                      icon={<FileText className="w-8 h-8 text-indigo-400" />}
+                    />
+                  </>
+                ) : (
+                  <div className="space-y-3">
+                    <div className="flex justify-between items-center -mt-2">
+                      <p className="text-sm text-slate-400">
+                        Paste your JSON data array here to generate a report layout for it.
+                      </p>
+                      <button 
+                        onClick={loadSampleJson}
+                        className="text-xs text-indigo-400 hover:text-indigo-300 flex items-center gap-1"
+                      >
+                        <Copy className="w-3 h-3" /> Paste Sample
+                      </button>
+                    </div>
+                    <div className="relative h-64 bg-[#0d1117] border-2 border-dashed border-slate-700 hover:border-slate-600 rounded-xl overflow-hidden focus-within:border-indigo-500/50 focus-within:bg-[#0d1117] transition-colors">
+                      <textarea
+                        value={jsonInput}
+                        onChange={(e) => setJsonInput(e.target.value)}
+                        className="w-full h-full bg-transparent text-xs md:text-sm font-mono text-slate-300 p-4 resize-none outline-none custom-scrollbar"
+                        placeholder={`[\n  {\n    "id": 1,\n    "name": "John Doe",\n    "role": "Developer"\n  },\n  ...\n]`}
+                        spellCheck={false}
+                      />
+                    </div>
+                  </div>
+                )}
                 
                 <button
                   onClick={runAnalysis}
-                  disabled={!targetFile || isAnalyzing}
+                  disabled={(inputType === 'file' && !targetFile) || (inputType === 'json' && !jsonInput) || isAnalyzing}
                   className={`
-                    w-full flex items-center justify-center gap-2 px-8 py-4 rounded-xl font-bold text-lg shadow-lg transition-all
-                    ${!targetFile || isAnalyzing 
+                    w-full flex items-center justify-center gap-2 px-8 py-4 rounded-xl font-bold text-lg shadow-lg transition-all mt-2
+                    ${(inputType === 'file' && !targetFile) || (inputType === 'json' && !jsonInput) || isAnalyzing 
                       ? 'bg-slate-700 text-slate-500 cursor-not-allowed' 
                       : 'bg-gradient-to-r from-indigo-600 to-blue-600 text-white hover:from-indigo-500 hover:to-blue-500 hover:shadow-indigo-500/25'}
                   `}
@@ -622,6 +710,19 @@ export default function App() {
           </div>
         )}
       </main>
+      
+      <footer className="border-t border-slate-800 bg-[#0f172a] py-6 mt-auto">
+        <div className="max-w-7xl mx-auto px-4 flex flex-col md:flex-row justify-between items-center text-slate-500 text-xs">
+          <div className="flex items-center gap-2 mb-2 md:mb-0">
+            <span>DocuGenius &copy; {new Date().getFullYear()}</span>
+            <span className="w-1 h-1 rounded-full bg-slate-600"></span>
+            <span className="font-mono text-indigo-400">{APP_VERSION}</span>
+          </div>
+          <div>
+            Powered by Google Gemini 2.5 Flash
+          </div>
+        </div>
+      </footer>
     </div>
   );
 }
