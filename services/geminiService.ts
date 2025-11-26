@@ -17,6 +17,12 @@ You also have access to a "Reference Library" of files.
 - Map the JSON keys to column headers intelligently (e.g., "empName" -> "Employee Name").
 - Generate code that expects an array of objects matching this JSON structure.
 
+**DETECTED STRUCTURES:**
+- Look for **Forms**: Input fields, checkboxes, signature lines.
+- Look for **Key-Value Pairs**: "Name: ...", "Date: ...".
+- Look for **Tables**: Grids, headers, rows.
+- Look for **Sections**: Headers grouping content.
+
 OUTPUT REQUIREMENTS:
 Return a JSON object strictly following this schema. Do not return Markdown code blocks, just the raw JSON string.
 
@@ -28,6 +34,12 @@ Schema:
       "count": number,
       "dimensions": ["string"] // e.g. "4 cols x 12 rows"
     },
+    "detectedForms": [ // List identified form fields
+       { "label": "string", "type": "text|checkbox|signature", "location": "string" }
+    ], 
+    "keyAttributes": [ // List detected key-value pairs found in headers or body
+       { "key": "string", "value": "string" }
+    ],
     "headers": {
       "title": "string",
       "subtitle": "string"
@@ -40,7 +52,7 @@ Schema:
   },
   "pdfMakeCode": "string", // The full JavaScript function string. It must accept 'data' as a parameter.
   "excelJSCode": "string", // The full JavaScript function string. It must accept 'data' as a parameter.
-  "extractedData": [] // Array of objects representing the main table data. LIMIT THIS TO 5 ROWS MAX.
+  "extractedData": [] // Array of objects representing the main table data. LIMIT THIS TO 1 ROW MAX.
 }
 
 CODE GENERATION RULES:
@@ -49,18 +61,21 @@ CODE GENERATION RULES:
    - MUST import from '@/plugins/pdfmake-style'.
    - MUST return an async function named 'exportPDF'.
    - Use 'docDefination' (user's preferred spelling) variable.
+   - If a form is detected, use 'columns' or 'table' with 'noBorders' to simulate form layouts.
    - If a template matched, reuse the layout (widths, margins) of that template.
-   - Use 'layout: lightHorizontalLines' for tables.
+   - Use 'layout: lightHorizontalLines' for standard tables.
+   - **MINIFY CODE**: Remove comments and unnecessary whitespace to save tokens.
 
 2. **ExcelJS**:
    - MUST import 'exceljs' and 'file-saver'.
    - MUST return an async function named 'exportToExcel(data)'.
    - Handle merged cells for Titles/Subtitles if detected.
    - Apply borders and alignment as specified in the prompt requirements.
+   - **MINIFY CODE**: Remove comments and unnecessary whitespace to save tokens.
 
 3. **Data**:
    - Extract a SAMPLE of the actual data from the Target to populate 'extractedData'.
-   - **CRITICAL: LIMIT EXTRACTED DATA TO 5 ROWS MAX.** 
+   - **CRITICAL: RETURN AN EMPTY ARRAY [] OR MAX 1 ROW SAMPLE.** 
    - DO NOT extract the entire dataset. This causes the response to be truncated and creates invalid JSON.
    - If the file is an image, perform OCR to get the text.
 `;
@@ -68,16 +83,62 @@ CODE GENERATION RULES:
 // Helper to clean JSON output from LLM
 const cleanJson = (text: string): string => {
   let cleaned = text.trim();
-  // Remove markdown code blocks
+  
+  // 1. Strip Markdown Code Fences (Standard)
   if (cleaned.startsWith('```json')) cleaned = cleaned.slice(7);
   if (cleaned.startsWith('```')) cleaned = cleaned.slice(3);
   if (cleaned.endsWith('```')) cleaned = cleaned.slice(0, -3);
   
-  // Fix common double-quote escaping issues sometimes produced by LLMs
-  // e.g. ""key"" -> "key"
+  // 2. Aggressive Extract: Find first '{' and last '}'
+  // This ignores any text before or after the JSON block
+  const firstBrace = cleaned.indexOf('{');
+  const lastBrace = cleaned.lastIndexOf('}');
+  
+  if (firstBrace !== -1 && lastBrace !== -1) {
+    cleaned = cleaned.substring(firstBrace, lastBrace + 1);
+  }
+
+  // 3. Common LLM Fixes
+  // Fix double-quote escaping issues: ""key"" -> "key"
   cleaned = cleaned.replace(/""([^"]+)""/g, '"$1"');
   
   return cleaned.trim();
+};
+
+// Robust parser that tries to fix truncated JSON
+const parseRobustJson = (text: string): AnalysisResult => {
+  try {
+    // Attempt 1: Clean and Parse
+    const cleaned = cleanJson(text);
+    return JSON.parse(cleaned);
+  } catch (e) {
+    console.warn("Standard parse failed, attempting repair...", e);
+    
+    // Attempt 2: Truncation Repair
+    // If the JSON ends unexpectedly, it might be truncated.
+    // We'll try to close open structures.
+    let repaired = cleanJson(text);
+    
+    // Count brackets to see if we need to close them
+    const openBraces = (repaired.match(/\{/g) || []).length;
+    const closeBraces = (repaired.match(/\}/g) || []).length;
+    const openSquares = (repaired.match(/\[/g) || []).length;
+    const closeSquares = (repaired.match(/\]/g) || []).length; // Fixed regex for closing square bracket
+
+    if (openBraces > closeBraces) {
+      repaired += '}'.repeat(openBraces - closeBraces);
+    }
+    if (openSquares > closeSquares) {
+      repaired += ']'.repeat(openSquares - closeSquares);
+    }
+
+    try {
+      return JSON.parse(repaired);
+    } catch (e2) {
+      console.error("Repair failed:", e2);
+      throw new Error("Failed to parse AI response. The model output may have been truncated due to complexity. Try simplifying the document.");
+    }
+  }
 };
 
 const fileToPart = async (file: File): Promise<any> => {
@@ -90,12 +151,16 @@ const fileToPart = async (file: File): Promise<any> => {
       
       let textContent = `File Name: ${file.name}\nType: Excel Spreadsheet\n\n`;
       
-      // Convert first 2 sheets to CSV for context
+      // Convert first 2 sheets to CSV for context, but LIMIT rows to save tokens
       const sheetsToRead = workbook.SheetNames.slice(0, 2); 
       sheetsToRead.forEach(sheetName => {
         const sheet = workbook.Sheets[sheetName];
-        const csv = XLSX.utils.sheet_to_csv(sheet);
-        textContent += `--- Sheet: ${sheetName} ---\n${csv}\n\n`;
+        // Use sheet_to_json to easily limit rows
+        const rows = XLSX.utils.sheet_to_json(sheet, { header: 1 }).slice(0, 50); // LIMIT TO 50 ROWS
+        if (rows.length === 0) return;
+        
+        const csv = rows.map((row: any) => (Array.isArray(row) ? row.join(",") : "")).join("\n");
+        textContent += `--- Sheet: ${sheetName} (First 50 rows) ---\n${csv}\n\n`;
       });
 
       return { text: textContent };
@@ -129,13 +194,13 @@ export const analyzeDocument = async (
   apiKey: string,
   target: { type: 'file'; file: File } | { type: 'json'; data: string },
   referenceFiles: File[],
-  onLog: (msg: string) => void
+  onLog: (msg: string) => void,
+  additionalInstructions?: string
 ): Promise<AnalysisResult> => {
   
   const ai = new GoogleGenAI({ apiKey });
   
   // Use 'gemini-2.5-flash' for fast, multimodal analysis
-  // Switching to flash-thinking if complex logic is needed, but flash is usually good for layout
   const modelId = 'gemini-2.5-flash'; 
 
   onLog(`Initializing Gemini (${modelId})...`);
@@ -148,12 +213,15 @@ export const analyzeDocument = async (
 
   const parts: any[] = [];
 
-  // 1. Add Reference Library context
+  // 1. Add Reference Library context (LIMITED to prevent token overflow)
   if (referenceFiles.length > 0) {
-    onLog(`Processing ${referenceFiles.length} reference templates...`);
+    const MAX_REFS = 3; // Limit number of reference files sent
+    const refsToSend = referenceFiles.slice(0, MAX_REFS);
+    
+    onLog(`Processing ${refsToSend.length} reference templates (limited to max ${MAX_REFS} to save tokens)...`);
     parts.push({ text: "REFERENCE LIBRARY FILES (Use these as templates if layout matches):" });
     
-    for (const refFile of referenceFiles) {
+    for (const refFile of refsToSend) {
       try {
         const refPart = await fileToPart(refFile);
         // If it's text (parsed Excel), just add it
@@ -182,14 +250,17 @@ export const analyzeDocument = async (
   } else {
     // Target is JSON
     parts.push({ text: "TARGET DATA (JSON Source):" });
-    // Truncate if absolutely massive to avoid context limits, but 100k chars is usually fine for Gemini 2.5
-    const truncatedJson = target.data.length > 100000 ? target.data.substring(0, 100000) + "\n...[TRUNCATED]" : target.data;
+    // Truncate to 50k chars to be safe
+    const truncatedJson = target.data.length > 50000 ? target.data.substring(0, 50000) + "\n...[TRUNCATED]" : target.data;
     parts.push({ text: truncatedJson });
   }
 
-  // 3. Add System Instruction as text part (best practice for some SDK versions, 
-  // though config.systemInstruction is also supported, putting it in prompt is robust)
-  parts.push({ text: "Analyze the target above. Provide the output JSON." });
+  // 3. Add Instructions
+  let promptText = "Analyze the target above. Provide the output JSON.";
+  if (additionalInstructions && additionalInstructions.trim().length > 0) {
+    promptText += `\n\nUSER EXTRA INSTRUCTIONS (PRIORITY):\n${additionalInstructions}`;
+  }
+  parts.push({ text: promptText });
 
   onLog("Sending data to Gemini API...");
 
@@ -202,40 +273,33 @@ export const analyzeDocument = async (
       },
       config: {
         systemInstruction: SYSTEM_INSTRUCTION,
-        temperature: 0.2, // Low temperature for consistent code generation
+        temperature: 0.2, 
         responseMimeType: "application/json" 
       }
     });
 
     onLog("Response received. Parsing JSON...");
     
-    // Correct way to access text with @google/genai SDK
     const responseText = result.text;
     
     if (!responseText) throw new Error("Empty response from AI");
 
-    const cleanedText = cleanJson(responseText);
-    
-    try {
-      const parsed = JSON.parse(cleanedText) as AnalysisResult;
+    const parsed = parseRobustJson(responseText);
       
-      // Basic validation
-      if (!parsed.summary || !parsed.pdfMakeCode || !parsed.excelJSCode) {
-        throw new Error("Incomplete JSON structure returned");
-      }
-
-      onLog("Analysis successful!");
-      return parsed;
-
-    } catch (parseError) {
-      console.error("JSON Parse Error:", parseError);
-      console.log("Raw Output:", responseText);
-      throw new Error("Failed to parse AI response. The model might have hallucinated invalid JSON.");
+    // Basic validation
+    if (!parsed.summary || !parsed.pdfMakeCode || !parsed.excelJSCode) {
+      throw new Error("Incomplete JSON structure returned");
     }
+
+    onLog("Analysis successful!");
+    return parsed;
 
   } catch (error: any) {
     console.error("Gemini API Error:", error);
-    if (error.message.includes("400")) {
+    if (error.message?.includes("400") || error.message?.includes("INVALID_ARGUMENT")) {
+       if (error.message?.includes("token count")) {
+         throw new Error("Input too large: The Reference Library or Target File exceeds the token limit. Try removing some reference files.");
+       }
        throw new Error("API Error 400: Bad Request. If uploading Excel, ensure it is not password protected.");
     }
     throw error;

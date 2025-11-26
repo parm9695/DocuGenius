@@ -6,7 +6,6 @@ import { templateStorage, TemplateFile } from './services/templateStorage';
 import { secureStorage } from './services/secureStorage';
 import { AnalysisResult } from './types';
 import { CodeBlock } from './components/CodeBlock';
-import packageJson from './package.json'; // Import version from package.json
 import { 
   FileText, 
   Library, 
@@ -30,11 +29,9 @@ import {
   RefreshCw,
   Braces,
   Copy,
-  Tag
+  Tag,
+  BookOpen
 } from 'lucide-react';
-
-// --- Configuration ---
-const APP_VERSION = `v${packageJson.version}`;
 
 // --- Types for Auth ---
 interface User {
@@ -43,6 +40,9 @@ interface User {
 }
 
 export default function App() {
+  // --- Configuration State ---
+  const [appVersion, setAppVersion] = useState<string>('v1.0.0');
+
   // --- Auth State ---
   const [user, setUser] = useState<User | null>(null);
   const [usernameInput, setUsernameInput] = useState('');
@@ -61,10 +61,29 @@ export default function App() {
   
   // --- UI State ---
   const [showKeyModal, setShowKeyModal] = useState(false);
+  const [showGuideModal, setShowGuideModal] = useState(false);
   const [isLoadingTemplates, setIsLoadingTemplates] = useState(false);
   
   const logsEndRef = useRef<HTMLDivElement>(null);
   const importInputRef = useRef<HTMLInputElement>(null);
+
+  // --- Initialization Effects ---
+  useEffect(() => {
+    loadTemplates();
+    fetchVersion();
+  }, []);
+
+  const fetchVersion = async () => {
+    try {
+      const response = await fetch('/package.json');
+      if (response.ok) {
+        const data = await response.json();
+        setAppVersion(`v${data.version}`);
+      }
+    } catch (e) {
+      console.warn("Could not fetch package.json version", e);
+    }
+  };
 
   // --- Load Templates on Mount ---
   const loadTemplates = async () => {
@@ -84,10 +103,6 @@ export default function App() {
       setIsLoadingTemplates(false);
     }
   };
-
-  useEffect(() => {
-    loadTemplates();
-  }, []);
 
   // --- Auth Handlers ---
   const handleLogin = (e: React.FormEvent) => {
@@ -282,7 +297,7 @@ export default function App() {
              </div>
              <h1 className="text-3xl font-bold text-white tracking-tight mb-2">DocuGenius</h1>
              <p className="text-slate-400">Universal Layout Converter</p>
-             <p className="text-xs text-slate-600 mt-2 font-mono">{APP_VERSION}</p>
+             <p className="text-xs text-slate-600 mt-2 font-mono">{appVersion}</p>
            </div>
 
            <form onSubmit={handleLogin} className="space-y-6">
@@ -335,12 +350,20 @@ export default function App() {
               <div className="flex items-center gap-2">
                 <h1 className="text-xl font-bold text-white tracking-tight hidden sm:block">DocuGenius</h1>
                 <span className="px-2 py-0.5 rounded bg-slate-700 text-slate-300 text-[10px] font-mono font-bold border border-slate-600">
-                  {APP_VERSION}
+                  {appVersion}
                 </span>
               </div>
             </div>
           </div>
           <div className="flex items-center gap-4">
+            <button 
+              onClick={() => setShowGuideModal(true)}
+              className="text-slate-400 hover:text-white transition-colors p-2 hover:bg-slate-800 rounded-lg mr-2"
+              title="How to use"
+            >
+               <BookOpen className="w-5 h-5" />
+            </button>
+
             <div className="hidden md:flex flex-col items-end mr-2">
                 <span className="text-sm font-medium text-white">{user.username}</span>
                 <span className="text-xs text-slate-400">
@@ -402,7 +425,15 @@ export default function App() {
                 />
               </div>
               <p className="text-xs text-slate-500 mt-2">
-                Your key is encrypted before being saved to this browser's storage.
+                Your key is encrypted before being saved to this browser's storage. 
+                <a 
+                  href="https://aistudio.google.com/api-keys" 
+                  target="_blank" 
+                  rel="noopener noreferrer" 
+                  className="text-indigo-400 hover:text-indigo-300 underline ml-1"
+                >
+                  Get API Key here
+                </a>
               </p>
             </div>
             
@@ -418,6 +449,123 @@ export default function App() {
                 className="px-6 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-sm font-bold shadow-lg"
               >
                 Save Key
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Guide Modal */}
+      {showGuideModal && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <div className="bg-[#1e293b] border border-slate-700 rounded-xl w-full max-w-3xl shadow-2xl flex flex-col max-h-[90vh]">
+            <div className="flex items-center justify-between p-6 border-b border-slate-700 bg-[#0f172a] rounded-t-xl">
+              <h3 className="text-xl font-bold text-white flex items-center gap-3">
+                <BookOpen className="w-6 h-6 text-indigo-400" />
+                How to use DocuGenius
+              </h3>
+              <button 
+                onClick={() => setShowGuideModal(false)}
+                className="text-slate-400 hover:text-white transition-colors p-1"
+              >
+                <XCircle className="w-6 h-6" />
+              </button>
+            </div>
+            
+            <div className="overflow-y-auto p-8 custom-scrollbar">
+              <div className="space-y-10 relative">
+                {/* Connecting Line */}
+                <div className="absolute left-6 top-8 bottom-8 w-0.5 bg-slate-700 hidden sm:block"></div>
+
+                {/* Step 1 */}
+                <div className="relative flex gap-6">
+                  <div className="flex-shrink-0 w-12 h-12 rounded-full bg-[#1e293b] border-2 border-indigo-500 text-indigo-400 flex items-center justify-center font-bold text-lg z-10 shadow-[0_0_10px_rgba(99,102,241,0.3)]">1</div>
+                  <div className="flex-1">
+                     <h4 className="text-lg font-bold text-white mb-2">Configure API Access</h4>
+                     <p className="text-slate-400 text-sm leading-relaxed mb-3">
+                       DocuGenius uses Google's powerful Gemini 2.5 Flash model.
+                     </p>
+                     <ul className="text-sm text-slate-400 space-y-1 list-disc pl-4">
+                        <li>Click the <span className="text-indigo-300 font-mono text-xs border border-indigo-500/30 px-1 rounded mx-1">Set API Key</span> button in the header.</li>
+                        <li>Get your key from <a href="https://aistudio.google.com/api-keys" target="_blank" rel="noopener noreferrer" className="text-indigo-400 hover:text-indigo-300 underline">Google AI Studio</a>.</li>
+                        <li>Enter your key (it is encrypted and stored locally).</li>
+                     </ul>
+                  </div>
+                </div>
+
+                {/* Step 2 */}
+                <div className="relative flex gap-6">
+                  <div className="flex-shrink-0 w-12 h-12 rounded-full bg-[#1e293b] border-2 border-indigo-500 text-indigo-400 flex items-center justify-center font-bold text-lg z-10 shadow-[0_0_10px_rgba(99,102,241,0.3)]">2</div>
+                  <div className="flex-1">
+                     <h4 className="text-lg font-bold text-white mb-2">Build Reference Library (Optional)</h4>
+                     <p className="text-slate-400 text-sm leading-relaxed mb-2">
+                       Teach the AI your preferred style.
+                     </p>
+                     <div className="bg-[#0f172a] p-4 rounded-lg border border-slate-700 text-sm text-slate-400">
+                        Upload blank forms, company letterheads, or previous reports to the <strong>Reference Library</strong> on the left. 
+                        The AI will attempt to match your target document to these styles when generating code.
+                     </div>
+                  </div>
+                </div>
+
+                {/* Step 3 */}
+                <div className="relative flex gap-6">
+                  <div className="flex-shrink-0 w-12 h-12 rounded-full bg-[#1e293b] border-2 border-indigo-500 text-indigo-400 flex items-center justify-center font-bold text-lg z-10 shadow-[0_0_10px_rgba(99,102,241,0.3)]">3</div>
+                  <div className="flex-1">
+                     <h4 className="text-lg font-bold text-white mb-2">Select Target Source</h4>
+                     <p className="text-slate-400 text-sm leading-relaxed mb-3">
+                       Choose what you want to convert:
+                     </p>
+                     <div className="grid sm:grid-cols-2 gap-3">
+                        <div className="p-3 bg-[#0f172a] rounded border border-slate-700 hover:border-indigo-500/50 transition-colors">
+                           <div className="flex items-center gap-2 mb-1 text-white font-semibold text-sm">
+                             <FileType className="w-4 h-4 text-blue-400" /> Document File
+                           </div>
+                           <p className="text-xs text-slate-500">Upload a PDF, Image, or Excel. Best for digitizing physical documents or existing files.</p>
+                        </div>
+                        <div className="p-3 bg-[#0f172a] rounded border border-slate-700 hover:border-indigo-500/50 transition-colors">
+                           <div className="flex items-center gap-2 mb-1 text-white font-semibold text-sm">
+                             <Braces className="w-4 h-4 text-yellow-400" /> JSON Data
+                           </div>
+                           <p className="text-xs text-slate-500">Paste a JSON array. Best for creating reports from API responses.</p>
+                        </div>
+                     </div>
+                  </div>
+                </div>
+
+                 {/* Step 4 */}
+                 <div className="relative flex gap-6">
+                  <div className="flex-shrink-0 w-12 h-12 rounded-full bg-[#1e293b] border-2 border-indigo-500 text-indigo-400 flex items-center justify-center font-bold text-lg z-10 shadow-[0_0_10px_rgba(99,102,241,0.3)]">4</div>
+                  <div className="flex-1">
+                     <h4 className="text-lg font-bold text-white mb-2">Generate & Integration</h4>
+                     <p className="text-slate-400 text-sm leading-relaxed mb-3">
+                       Click <strong>Generate Code</strong>. You will receive:
+                     </p>
+                     <ul className="space-y-2">
+                        <li className="flex items-start gap-2 text-sm text-slate-400">
+                           <CheckCircle2 className="w-4 h-4 text-green-500 mt-0.5" />
+                           <span><strong>pdfmake Code:</strong> A complete JavaScript function to generate a PDF matching your layout.</span>
+                        </li>
+                        <li className="flex items-start gap-2 text-sm text-slate-400">
+                           <CheckCircle2 className="w-4 h-4 text-green-500 mt-0.5" />
+                           <span><strong>ExcelJS Code:</strong> A script to generate an identical Excel spreadsheet.</span>
+                        </li>
+                        <li className="flex items-start gap-2 text-sm text-slate-400">
+                           <CheckCircle2 className="w-4 h-4 text-green-500 mt-0.5" />
+                           <span><strong>Extracted Data:</strong> (If using file upload) A JSON representation of the data found in the document.</span>
+                        </li>
+                     </ul>
+                  </div>
+                </div>
+              </div>
+            </div>
+            
+            <div className="p-6 border-t border-slate-700 bg-[#0f172a] flex justify-end">
+              <button 
+                onClick={() => setShowGuideModal(false)}
+                className="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl font-bold shadow-lg shadow-indigo-500/20 transition-all flex items-center gap-2"
+              >
+                Let's Start <ArrowRight className="w-4 h-4" />
               </button>
             </div>
           </div>
@@ -716,7 +864,7 @@ export default function App() {
           <div className="flex items-center gap-2 mb-2 md:mb-0">
             <span>DocuGenius &copy; {new Date().getFullYear()}</span>
             <span className="w-1 h-1 rounded-full bg-slate-600"></span>
-            <span className="font-mono text-indigo-400">{APP_VERSION}</span>
+            <span className="font-mono text-indigo-400">{appVersion}</span>
           </div>
           <div>
             Powered by Google Gemini 2.5 Flash
