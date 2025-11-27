@@ -41,7 +41,7 @@ interface User {
 
 export default function App() {
   // --- Configuration State ---
-  const [appVersion, setAppVersion] = useState<string>('v1.0.0');
+  const [appVersion, setAppVersion] = useState<string>('v1.2.1');
 
   // --- Auth State ---
   const [user, setUser] = useState<User | null>(null);
