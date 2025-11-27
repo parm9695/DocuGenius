@@ -291,6 +291,21 @@ export const analyzeDocument = async (
       throw new Error("Incomplete JSON structure returned");
     }
 
+    // --- Fix: Ensure types match interface to prevent UI crashes ---
+    if (parsed.summary?.detectedTables) {
+       // Ensure dimensions is an array. AI might return a string like "2x2".
+       if (!Array.isArray(parsed.summary.detectedTables.dimensions)) {
+          const val = parsed.summary.detectedTables.dimensions;
+          parsed.summary.detectedTables.dimensions = val ? [String(val)] : [];
+       }
+       // Ensure count is a number
+       if (typeof parsed.summary.detectedTables.count !== 'number') {
+          parsed.summary.detectedTables.count = Number(parsed.summary.detectedTables.count) || 0;
+       }
+    } else if (parsed.summary) {
+       parsed.summary.detectedTables = { count: 0, dimensions: [] };
+    }
+
     onLog("Analysis successful!");
     return parsed;
 

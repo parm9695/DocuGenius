@@ -782,7 +782,11 @@ export default function App() {
                       <div>
                         <label className="text-xs text-slate-500">Detected Structure</label>
                         <div className="font-mono text-slate-200">{result.summary.detectedTables.count} Tables</div>
-                        <div className="text-xs text-slate-400">{result.summary.detectedTables.dimensions.join(', ')}</div>
+                        <div className="text-xs text-slate-400">
+                          {Array.isArray(result.summary.detectedTables?.dimensions) 
+                             ? result.summary.detectedTables.dimensions.join(', ') 
+                             : (result.summary.detectedTables?.dimensions || '')}
+                        </div>
                       </div>
 
                       <div>
