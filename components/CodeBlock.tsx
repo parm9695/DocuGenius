@@ -1,10 +1,12 @@
 import React, { useMemo, useState, useEffect } from 'react';
-import { Copy, Check, Maximize2, Minimize2 } from 'lucide-react';
+import { Copy, Check, Maximize2, Minimize2, Edit2, Save } from 'lucide-react';
 
 interface CodeBlockProps {
   code: string;
   language?: string;
   filename?: string;
+  editable?: boolean;
+  onCodeChange?: (newCode: string) => void;
 }
 
 // --- 1. Simple Auto-Formatter (Beautifier) ---
@@ -95,23 +97,35 @@ const SyntaxHighlight = ({ code }: { code: string }) => {
   );
 };
 
-export const CodeBlock: React.FC<CodeBlockProps> = ({ code, language = 'javascript', filename = 'untitled' }) => {
+export const CodeBlock: React.FC<CodeBlockProps> = ({ code, language = 'javascript', filename = 'untitled', editable = false, onCodeChange }) => {
   const [copied, setCopied] = useState(false);
   const [formattedCode, setFormattedCode] = useState('');
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [isEditing, setIsEditing] = useState(false);
+  const [editValue, setEditValue] = useState('');
 
   useEffect(() => {
-    // Format the code whenever input changes
-    setFormattedCode(formatCode(code, language));
+    // Format the code whenever input changes from props
+    const formatted = formatCode(code, language);
+    setFormattedCode(formatted);
+    setEditValue(formatted);
   }, [code, language]);
 
   const copyToClipboard = () => {
-    navigator.clipboard.writeText(formattedCode);
+    navigator.clipboard.writeText(isEditing ? editValue : formattedCode);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
 
-  const lines = formattedCode.split('\n');
+  const handleSave = () => {
+    if (onCodeChange) {
+        onCodeChange(editValue);
+    }
+    setFormattedCode(editValue); // Update view
+    setIsEditing(false);
+  };
+
+  const lines = (isEditing ? editValue : formattedCode).split('\n');
 
   return (
     <div className={`
@@ -130,10 +144,33 @@ export const CodeBlock: React.FC<CodeBlockProps> = ({ code, language = 'javascri
              {language === 'javascript' && <span className="text-[#f1e05a]">JS</span>}
              {language === 'json' && <span className="text-[#f1e05a]">{'{ }'}</span>}
              <span>{filename}</span>
+             {editable && isEditing && <span className="text-orange-400 ml-1">• Editing</span>}
           </div>
         </div>
 
         <div className="flex items-center gap-2">
+          {editable && (
+              isEditing ? (
+                  <button
+                    onClick={handleSave}
+                    className="p-1.5 bg-green-600/20 text-green-400 hover:bg-green-600/30 rounded transition-colors flex items-center gap-1 px-2"
+                    title="Apply Changes"
+                  >
+                      <Save className="w-3.5 h-3.5" />
+                      <span className="text-xs font-bold">Apply</span>
+                  </button>
+              ) : (
+                  <button
+                    onClick={() => setIsEditing(true)}
+                    className="p-1.5 text-slate-400 hover:text-white hover:bg-[#333] rounded transition-colors flex items-center gap-1"
+                    title="Edit Code"
+                  >
+                      <Edit2 className="w-3.5 h-3.5" />
+                      <span className="text-xs">Edit</span>
+                  </button>
+              )
+          )}
+
            <button
             onClick={() => setIsFullscreen(!isFullscreen)}
             className="p-1.5 text-slate-400 hover:text-white hover:bg-[#333] rounded transition-colors"
@@ -167,10 +204,19 @@ export const CodeBlock: React.FC<CodeBlockProps> = ({ code, language = 'javascri
           </div>
           
           {/* Code Area */}
-          <div className="flex-1 py-4 px-4 overflow-x-auto">
-            <pre className="font-mono text-[#d4d4d4] text-[13px] leading-6 whitespace-pre tab-4">
-              <SyntaxHighlight code={formattedCode} />
-            </pre>
+          <div className="flex-1 overflow-x-auto relative">
+            {editable && isEditing ? (
+                <textarea
+                    value={editValue}
+                    onChange={(e) => setEditValue(e.target.value)}
+                    className="w-full h-full bg-[#1e1e1e] text-[#d4d4d4] font-mono text-[13px] leading-6 p-4 outline-none resize-none absolute inset-0"
+                    spellCheck={false}
+                />
+            ) : (
+                <pre className="font-mono text-[#d4d4d4] text-[13px] leading-6 whitespace-pre tab-4 py-4 px-4">
+                  <SyntaxHighlight code={formattedCode} />
+                </pre>
+            )}
           </div>
         </div>
       </div>
@@ -180,6 +226,7 @@ export const CodeBlock: React.FC<CodeBlockProps> = ({ code, language = 'javascri
         <div className="flex gap-3">
           <span>UTF-8</span>
           <span>{language.toUpperCase()}</span>
+          {editable && isEditing && <span className="font-bold text-orange-200">UNSAVED CHANGES</span>}
         </div>
         <div>
           Ln {lines.length}, Col 1

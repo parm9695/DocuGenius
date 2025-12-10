@@ -26,5 +26,5 @@ export interface AnalysisResult {
   summary: AnalysisSummary;
   pdfMakeCode: string;
   excelJSCode: string;
-  extractedData: any[]; // JSON data representation
+  extractedData: any; // JSON data representation (Array or Object)
 }

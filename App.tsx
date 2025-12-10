@@ -1,11 +1,12 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import { FileUploader } from './components/FileUploader';
-import { analyzeDocument } from './services/geminiService';
+import { analyzeDocument, generateCodeExplanation } from './services/geminiService';
 import { templateStorage, TemplateFile } from './services/templateStorage';
 import { secureStorage } from './services/secureStorage';
 import { AnalysisResult } from './types';
 import { CodeBlock } from './components/CodeBlock';
+import { PdfPreview } from './components/PdfPreview';
 import { 
   FileText, 
   Library, 
@@ -30,7 +31,12 @@ import {
   Braces,
   Copy,
   Tag,
-  BookOpen
+  BookOpen,
+  BrainCircuit,
+  Sparkles,
+  Eye,
+  Split,
+  AlertTriangle
 } from 'lucide-react';
 
 // --- Types for Auth ---
@@ -41,7 +47,7 @@ interface User {
 
 export default function App() {
   // --- Configuration State ---
-  const [appVersion, setAppVersion] = useState<string>('v1.2.1');
+  const [appVersion, setAppVersion] = useState<string>('v1.0.0');
 
   // --- Auth State ---
   const [user, setUser] = useState<User | null>(null);
@@ -50,15 +56,21 @@ export default function App() {
   // --- App State ---
   const [inputType, setInputType] = useState<'file' | 'json'>('file');
   const [targetFile, setTargetFile] = useState<File | null>(null);
+  const [targetPreviewUrl, setTargetPreviewUrl] = useState<string | null>(null);
   const [jsonInput, setJsonInput] = useState('');
   
   const [referenceFiles, setReferenceFiles] = useState<File[]>([]);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [logs, setLogs] = useState<string[]>([]);
+  const [statusMessage, setStatusMessage] = useState<string>('');
   const [result, setResult] = useState<AnalysisResult | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<'pdf' | 'excel' | 'data'>('pdf');
+  const [activeTab, setActiveTab] = useState<'pdf' | 'pdf-preview' | 'excel' | 'data' | 'explanation'>('pdf');
   
+  // --- Explanation State ---
+  const [explanation, setExplanation] = useState<string | null>(null);
+  const [isExplaining, setIsExplaining] = useState(false);
+
   // --- UI State ---
   const [showKeyModal, setShowKeyModal] = useState(false);
   const [showGuideModal, setShowGuideModal] = useState(false);
@@ -125,8 +137,10 @@ export default function App() {
     setUser(null);
     setResult(null);
     setTargetFile(null);
+    setTargetPreviewUrl(null);
     setJsonInput('');
     setLogs([]);
+    setStatusMessage('');
     setUsernameInput('');
     setError(null);
   };
@@ -146,10 +160,21 @@ export default function App() {
 
   // --- File Handlers ---
   const handleTargetSelect = (files: File[]) => {
-    setTargetFile(files[0]);
+    const file = files[0];
+    setTargetFile(file);
     setResult(null);
     setError(null);
     setLogs([]);
+    setStatusMessage('');
+    setExplanation(null);
+
+    // Create preview URL if it's an image
+    if (file && file.type.startsWith('image/')) {
+        const url = URL.createObjectURL(file);
+        setTargetPreviewUrl(url);
+    } else {
+        setTargetPreviewUrl(null);
+    }
   };
 
   const handleReferenceSelect = async (files: File[]) => {
@@ -227,6 +252,7 @@ export default function App() {
 
   const addLog = (message: string) => {
     setLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] ${message}`]);
+    setStatusMessage(message);
   };
 
   useEffect(() => {
@@ -240,6 +266,23 @@ export default function App() {
       { id: 3, name: "Bob Johnson", role: "Designer", department: "Creative", salary: 78000 }
     ];
     setJsonInput(JSON.stringify(sample, null, 2));
+  };
+
+  // --- Logic to update extracted data manually ---
+  const handleDataUpdate = (newJsonString: string) => {
+    try {
+        const newData = JSON.parse(newJsonString);
+        if (result) {
+            setResult({
+                ...result,
+                extractedData: newData
+            });
+            // Switch to preview tab to show the update
+            setActiveTab('pdf-preview');
+        }
+    } catch (e) {
+        alert("Invalid JSON structure. Please check your syntax.");
+    }
   };
 
   const runAnalysis = async () => {
@@ -264,6 +307,8 @@ export default function App() {
     setError(null);
     setResult(null);
     setLogs([]);
+    setExplanation(null);
+    setStatusMessage('Starting analysis...');
     addLog("Starting analysis session...");
 
     try {
@@ -280,6 +325,26 @@ export default function App() {
       addLog(`ERROR: ${errorMsg}`);
     } finally {
       setIsAnalyzing(false);
+      setStatusMessage('');
+    }
+  };
+
+  const runExplanation = async () => {
+    if (!result || !user?.apiKey) return;
+    
+    setIsExplaining(true);
+    try {
+      // Decide which code to explain based on last active tab, default to PDF if current is 'explanation'
+      const type = activeTab === 'excel' ? 'exceljs' : 'pdfmake';
+      const code = activeTab === 'excel' ? result.excelJSCode : result.pdfMakeCode;
+      
+      const text = await generateCodeExplanation(user.apiKey, code, type);
+      setExplanation(text);
+    } catch (e) {
+      console.error(e);
+      setExplanation("Failed to generate explanation. Please try again.");
+    } finally {
+      setIsExplaining(false);
     }
   };
 
@@ -343,6 +408,13 @@ export default function App() {
       <header className="bg-[#1e293b] border-b border-slate-700 sticky top-0 z-10 shadow-lg">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
           <div className="flex items-center gap-3">
+             <button 
+              onClick={() => setShowGuideModal(true)}
+              className="text-slate-400 hover:text-white transition-colors p-2 hover:bg-slate-800 rounded-lg"
+              title="How to use"
+            >
+               <BookOpen className="w-5 h-5" />
+            </button>
             <div className="bg-indigo-500 p-2 rounded-lg">
               <FileText className="w-6 h-6 text-white" />
             </div>
@@ -356,14 +428,6 @@ export default function App() {
             </div>
           </div>
           <div className="flex items-center gap-4">
-            <button 
-              onClick={() => setShowGuideModal(true)}
-              className="text-slate-400 hover:text-white transition-colors p-2 hover:bg-slate-800 rounded-lg mr-2"
-              title="How to use"
-            >
-               <BookOpen className="w-5 h-5" />
-            </button>
-
             <div className="hidden md:flex flex-col items-end mr-2">
                 <span className="text-sm font-medium text-white">{user.username}</span>
                 <span className="text-xs text-slate-400">
@@ -714,8 +778,17 @@ export default function App() {
                       : 'bg-gradient-to-r from-indigo-600 to-blue-600 text-white hover:from-indigo-500 hover:to-blue-500 hover:shadow-indigo-500/25'}
                   `}
                 >
-                  {isAnalyzing ? 'Initializing...' : 'Generate Code'} 
-                  {!isAnalyzing && <ArrowRight className="w-5 h-5" />}
+                  {isAnalyzing ? (
+                    <>
+                       <RefreshCw className="w-5 h-5 animate-spin" />
+                       <span className="text-base font-medium animate-pulse">{statusMessage || 'Analyzing...'}</span>
+                    </>
+                  ) : (
+                    <>
+                      Generate Code 
+                      <ArrowRight className="w-5 h-5" />
+                    </>
+                  )}
                 </button>
               </div>
             </div>
@@ -818,6 +891,13 @@ export default function App() {
                     <span className="font-medium">pdfmake Config</span>
                   </button>
                   <button 
+                    onClick={() => setActiveTab('pdf-preview')}
+                    className={`text-left px-4 py-3 rounded-xl transition-all flex items-center gap-3 ${activeTab === 'pdf-preview' ? 'bg-indigo-500/80 text-white border border-indigo-400/50' : 'bg-[#1e293b] text-slate-400 hover:bg-[#2d3b4f]'}`}
+                  >
+                    <Eye className="w-4 h-4" />
+                    <span className="font-medium">PDF Preview</span>
+                  </button>
+                  <button 
                     onClick={() => setActiveTab('excel')}
                     className={`text-left px-4 py-3 rounded-xl transition-all flex items-center gap-3 ${activeTab === 'excel' ? 'bg-green-600 text-white' : 'bg-[#1e293b] text-slate-400 hover:bg-[#2d3b4f]'}`}
                   >
@@ -830,6 +910,14 @@ export default function App() {
                   >
                     <Database className="w-4 h-4" />
                     <span className="font-medium">Extracted JSON</span>
+                    <span className="ml-auto text-[10px] bg-blue-500/20 text-blue-300 px-1.5 rounded border border-blue-500/30">EDIT</span>
+                  </button>
+                  <button 
+                    onClick={() => setActiveTab('explanation')}
+                    className={`text-left px-4 py-3 rounded-xl transition-all flex items-center gap-3 ${activeTab === 'explanation' ? 'bg-purple-600 text-white' : 'bg-[#1e293b] text-slate-400 hover:bg-[#2d3b4f]'}`}
+                  >
+                    <BrainCircuit className="w-4 h-4" />
+                    <span className="font-medium">Explain Code</span>
                   </button>
                 </div>
               </div>
@@ -843,6 +931,36 @@ export default function App() {
                       filename="generatePDF.js" 
                     />
                  )}
+                 {activeTab === 'pdf-preview' && (
+                  <div className="h-full w-full flex gap-4">
+                    {targetPreviewUrl && (
+                      <div className="w-1/2 h-full flex flex-col bg-[#1e293b] rounded-xl overflow-hidden border border-slate-700 shadow-xl">
+                         <div className="px-4 py-2 bg-[#2d3b4f] border-b border-slate-600 flex items-center justify-between">
+                            <span className="text-xs font-bold text-slate-300 flex items-center gap-2">
+                               <FileType className="w-3 h-3 text-blue-400" />
+                               ORIGINAL SOURCE
+                            </span>
+                            <span className="text-[10px] text-slate-400">Reference Image</span>
+                         </div>
+                         <div className="flex-grow overflow-auto p-4 flex items-center justify-center bg-[#525659]">
+                            <img src={targetPreviewUrl} alt="Original Source" className="max-w-full shadow-lg" />
+                         </div>
+                      </div>
+                    )}
+                    <div className={`${targetPreviewUrl ? 'w-1/2' : 'w-full'} h-full flex flex-col`}>
+                         <div className="px-4 py-2 bg-[#2d3b4f] border-b border-slate-600 rounded-t-xl border-x border-t flex items-center justify-between">
+                            <span className="text-xs font-bold text-slate-300 flex items-center gap-2">
+                               <FileText className="w-3 h-3 text-indigo-400" />
+                               GENERATED RESULT
+                            </span>
+                         </div>
+                      <PdfPreview
+                        code={result.pdfMakeCode}
+                        data={result.extractedData}
+                      />
+                    </div>
+                  </div>
+                 )}
                  {activeTab === 'excel' && (
                     <CodeBlock 
                       code={result.excelJSCode} 
@@ -851,11 +969,64 @@ export default function App() {
                     />
                  )}
                  {activeTab === 'data' && (
-                    <CodeBlock 
-                      code={JSON.stringify(result.extractedData, null, 2)} 
-                      language="json" 
-                      filename="data.json" 
-                    />
+                    <div className="flex flex-col h-full gap-2">
+                        <div className="bg-blue-500/10 border border-blue-500/20 text-blue-200 text-xs p-3 rounded-lg flex items-center gap-2">
+                            <AlertTriangle className="w-4 h-4 text-blue-400" />
+                            <span>
+                                <strong>Tip:</strong> OCR can be imperfect. You can fix typos in the JSON below and click "Apply" to instantly update the PDF Preview.
+                            </span>
+                        </div>
+                        <CodeBlock 
+                        code={JSON.stringify(result.extractedData, null, 2)} 
+                        language="json" 
+                        filename="data.json" 
+                        editable={true}
+                        onCodeChange={handleDataUpdate}
+                        />
+                    </div>
+                 )}
+                 {activeTab === 'explanation' && (
+                   <div className="bg-[#1e293b] p-6 rounded-xl border border-slate-700 shadow-lg h-full overflow-y-auto">
+                     {!explanation && !isExplaining ? (
+                       <div className="flex flex-col items-center justify-center h-full text-center space-y-4">
+                         <div className="bg-purple-500/20 p-4 rounded-full">
+                           <Sparkles className="w-10 h-10 text-purple-400" />
+                         </div>
+                         <h3 className="text-xl font-bold text-white">Analyze Code Logic</h3>
+                         <p className="text-slate-400 max-w-md">
+                           Get a detailed breakdown of the generated pdfmake or ExcelJS code, including structure, mapping logic, and styling decisions.
+                         </p>
+                         <button 
+                           onClick={runExplanation}
+                           className="px-6 py-2 bg-purple-600 hover:bg-purple-500 text-white rounded-lg font-bold transition-colors"
+                         >
+                           Generate Explanation
+                         </button>
+                       </div>
+                     ) : isExplaining ? (
+                       <div className="flex flex-col items-center justify-center h-full text-center space-y-4">
+                         <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-purple-500"></div>
+                         <p className="text-slate-300">Analyzing code structure...</p>
+                       </div>
+                     ) : (
+                       <div className="prose prose-invert max-w-none">
+                         <div className="flex items-center justify-between mb-4 border-b border-slate-700 pb-4">
+                            <h3 className="text-lg font-bold text-purple-400 flex items-center gap-2">
+                              <BrainCircuit className="w-5 h-5" /> Code Explanation
+                            </h3>
+                            <button 
+                              onClick={() => setExplanation(null)}
+                              className="text-xs text-slate-500 hover:text-white"
+                            >
+                              Clear
+                            </button>
+                         </div>
+                         <div className="whitespace-pre-wrap text-slate-300 text-sm leading-relaxed font-sans">
+                           {explanation}
+                         </div>
+                       </div>
+                     )}
+                   </div>
                  )}
               </div>
             </div>
