@@ -83,37 +83,27 @@ const unescapeJsonString = (str: string): string => {
 
 const fixEscapedNewlines = (code: string): string => {
     if (!code) return code;
-    // Replace literal \n with real newlines in structural positions
-    // This fixes the issue where code comes back as "function() {\n // comment"
     return code
-        .replace(/\\n\s*\/\//g, '\n //') // Newline before comment
-        .replace(/\/\/(.*?)\\n/g, '//$1\n') // Newline AFTER comment (Fix for comments that swallow the next line)
-        .replace(/;\s*\\n/g, ';\n')      // Statement ends
-        .replace(/{\s*\\n/g, '{\n')      // Block starts
-        .replace(/}\s*\\n/g, '}\n')      // Block ends
-        .replace(/,\s*\\n/g, ',\n')      // Array/Object elements
-        .replace(/\[\s*\\n/g, '[\n')     // Array start
-        .replace(/\)\s*\\n/g, ')\n');    // Function end
+        .replace(/\\n\s*\/\//g, '\n //') 
+        .replace(/\/\/(.*?)\\n/g, '//$1\n')
+        .replace(/;\s*\\n/g, ';\n')      
+        .replace(/{\s*\\n/g, '{\n')      
+        .replace(/}\s*\\n/g, '}\n')      
+        .replace(/,\s*\\n/g, ',\n')      
+        .replace(/\[\s*\\n/g, '[\n')     
+        .replace(/\)\s*\\n/g, ')\n');    
 };
 
-/**
- * Fuzzy extraction: Looks for content between two known keys.
- * This ignores valid JSON structure constraints to recover data from malformed responses.
- */
 const fuzzyExtractBetweenKeys = (fullText: string, keyStart: string, keyEnd: string | null): string | null => {
-  // Regex to find "key": "
   const startRegex = new RegExp(`["']${keyStart}["']\\s*:\\s*["']`, 'i');
   const startMatch = fullText.match(startRegex);
   
   if (!startMatch || typeof startMatch.index === 'undefined') return null;
   
   const contentStartIndex = startMatch.index + startMatch[0].length;
-  
   let contentEndIndex = -1;
 
   if (keyEnd) {
-    // Look for ", "nextKey"
-    // We allow for newlines or spaces before the next key
     const endRegex = new RegExp(`["'],\\s*[\\r\\n]*\\s*["']${keyEnd}["']`, 'i');
     const rest = fullText.slice(contentStartIndex);
     const endMatch = rest.match(endRegex);
@@ -122,15 +112,11 @@ const fuzzyExtractBetweenKeys = (fullText: string, keyStart: string, keyEnd: str
     }
   }
 
-  // If no end key found (or it's the last item), try to find the end of the JSON string
   if (contentEndIndex === -1) {
-      // Heuristic: Look for the last quote in the string. 
-      // This assumes the file ends with closing braces or brackets which are outside the string.
       const lastQuote = fullText.lastIndexOf('"');
       if (lastQuote > contentStartIndex) {
           contentEndIndex = lastQuote;
       } else {
-          // Absolute fallback: take everything
           contentEndIndex = fullText.length;
       }
   }
@@ -140,17 +126,15 @@ const fuzzyExtractBetweenKeys = (fullText: string, keyStart: string, keyEnd: str
 };
 
 const extractJsonObject = (fullText: string, key: string): any => {
-  // Find "key": {
   const keyRegex = new RegExp(`(["']?)${key}\\1\\s*:\\s*({)`, 'i');
   const match = fullText.match(keyRegex);
   
   if (!match || typeof match.index === 'undefined') return null;
   
-  const startIdx = match.index + match[0].length - 1; // start at {
+  const startIdx = match.index + match[0].length - 1; 
   let balance = 0;
   let i = startIdx;
   
-  // Simple brace counting to find end of object
   while (i < fullText.length) {
     const char = fullText[i];
     if (char === '{') balance++;
@@ -170,7 +154,6 @@ const extractJsonObject = (fullText: string, key: string): any => {
 }
 
 const extractFunctionFallback = (fullText: string, funcName: string): string | null => {
-  // Regex to find start of function
   const regex = new RegExp(`(async\\s+function\\s+${funcName}\\s*\\(|const\\s+${funcName}\\s*=\s*async)`, 'i');
   const match = fullText.match(regex);
   
@@ -181,7 +164,6 @@ const extractFunctionFallback = (fullText: string, funcName: string): string | n
   let funcStart = -1;
   let foundStart = false;
   
-  // Simple brace counting
   for (let i = startSearch; i < fullText.length; i++) {
     const char = fullText[i];
     if (char === '{') {
@@ -204,14 +186,12 @@ const extractFunctionFallback = (fullText: string, funcName: string): string | n
 const parseRobustJson = (text: string): AnalysisResult => {
   const current = cleanJson(text);
 
-  // 1. Try Standard Parse first
+  // 1. Try Standard Parse
   try {
     const result = JSON.parse(current);
     if (result.pdfMakeCode) {
-        // Apply fix to cleanup formatting
         result.pdfMakeCode = fixEscapedNewlines(result.pdfMakeCode);
         result.excelJSCode = fixEscapedNewlines(result.excelJSCode);
-        // Ensure data is at least empty array if undefined
         if (result.extractedData === undefined || result.extractedData === null) {
           result.extractedData = [];
         }
@@ -237,13 +217,11 @@ const parseRobustJson = (text: string): AnalysisResult => {
     console.warn("Standard parsing failed. Attempting fuzzy extraction...");
   }
 
-  // 3. Fuzzy Extraction Strategy (Most Robust)
+  // 3. Fuzzy Extraction
   try {
-      // Extract Code Blocks using fuzzy logic (Key to Next Key)
       let pdfMakeCode = fuzzyExtractBetweenKeys(current, "pdfMakeCode", "excelJSCode");
       let excelJSCode = fuzzyExtractBetweenKeys(current, "excelJSCode", "extractedData");
       
-      // Fallback: regex search for functions if fuzzy failed
       if (!pdfMakeCode || pdfMakeCode.length < 50) {
          pdfMakeCode = extractFunctionFallback(text, "exportPDF");
       }
@@ -251,7 +229,6 @@ const parseRobustJson = (text: string): AnalysisResult => {
          excelJSCode = extractFunctionFallback(text, "exportToExcel");
       }
 
-      // Add default imports if missing
       if (pdfMakeCode && !pdfMakeCode.includes("import")) {
           pdfMakeCode = "// Imports added by system\nimport { text } from '@/plugins/pdfmake-style';\n\n" + pdfMakeCode;
       }
@@ -259,22 +236,17 @@ const parseRobustJson = (text: string): AnalysisResult => {
           excelJSCode = "// Imports added by system\nimport ExcelJS from 'exceljs';\nimport { saveAs } from 'file-saver';\n\n" + excelJSCode;
       }
       
-      // Apply Fix
       if (pdfMakeCode) pdfMakeCode = fixEscapedNewlines(pdfMakeCode);
       if (excelJSCode) excelJSCode = fixEscapedNewlines(excelJSCode);
 
-      // Extract Summary
       let summary = extractJsonObject(current, "summary") || { 
           fileType: "unknown", 
           detectedTables: { count: 0, dimensions: [] },
           headers: { title: "Generated Document", subtitle: "" }
       };
 
-      // Extract Data (Optional)
       let extractedData: any = [];
       try {
-        // Try to find extractedData. It could be Array [ or Object {
-        // We regex for the key, then look at the next meaningful char
         const keyMatch = current.match(/["']?extractedData["']?\s*:/);
         if (keyMatch && typeof keyMatch.index !== 'undefined') {
             const afterKeyIndex = keyMatch.index + keyMatch[0].length;
@@ -282,11 +254,10 @@ const parseRobustJson = (text: string): AnalysisResult => {
             const startCharMatch = remaining.match(/(\[|\{)/);
             
             if (startCharMatch && typeof startCharMatch.index !== 'undefined') {
-                const startChar = startCharMatch[0]; // [ or {
+                const startChar = startCharMatch[0]; 
                 const relativeStart = startCharMatch.index;
                 const absoluteStart = afterKeyIndex + relativeStart;
                 
-                // Find matching bracket
                 let balance = 0;
                 let openChar = startChar;
                 let closeChar = startChar === '[' ? ']' : '}';
@@ -306,7 +277,6 @@ const parseRobustJson = (text: string): AnalysisResult => {
           console.warn("Failed to manually extract data, using empty array");
       }
 
-      // Validation
       if (pdfMakeCode || excelJSCode) {
           return {
               summary,
@@ -327,7 +297,6 @@ const parseRobustJson = (text: string): AnalysisResult => {
 const fileToPart = async (file: File): Promise<any> => {
   const lowerName = file.name.toLowerCase();
 
-  // Handle Text/Code files for References
   if (file.type.startsWith('text/') || 
       lowerName.endsWith('.js') || 
       lowerName.endsWith('.jsx') || 
@@ -342,7 +311,6 @@ const fileToPart = async (file: File): Promise<any> => {
       const reader = new FileReader();
       reader.onload = () => {
         const text = reader.result as string;
-        // Truncate if very large
         const content = text.length > 50000 ? text.substring(0, 50000) + "\n...[TRUNCATED]" : text;
         resolve({ text: `[Reference Code/Text File: ${file.name}]\n${content}` });
       };
@@ -351,7 +319,6 @@ const fileToPart = async (file: File): Promise<any> => {
     });
   }
 
-  // Handle Excel
   if (lowerName.endsWith('.xlsx') || lowerName.endsWith('.xls') || file.type.includes('spreadsheet') || file.type.includes('excel')) {
     try {
       const arrayBuffer = await file.arrayBuffer();
@@ -360,7 +327,7 @@ const fileToPart = async (file: File): Promise<any> => {
       const sheetsToRead = workbook.SheetNames.slice(0, 2); 
       sheetsToRead.forEach(sheetName => {
         const sheet = workbook.Sheets[sheetName];
-        const rows = XLSX.utils.sheet_to_json(sheet, { header: 1 }).slice(0, 50); // LIMIT TO 50 ROWS
+        const rows = XLSX.utils.sheet_to_json(sheet, { header: 1 }).slice(0, 50); 
         if (rows.length === 0) return;
         const csv = rows.map((row: any) => (Array.isArray(row) ? row.join(",") : "")).join("\n");
         textContent += `--- Sheet: ${sheetName} (First 50 rows) ---\n${csv}\n\n`;
@@ -371,7 +338,6 @@ const fileToPart = async (file: File): Promise<any> => {
     }
   }
 
-  // Handle PDF/Image
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onloadend = () => {
@@ -398,21 +364,20 @@ export const analyzeDocument = async (
 ): Promise<AnalysisResult> => {
   
   const ai = new GoogleGenAI({ apiKey });
-  // Switched to gemini-3-pro-preview for complex layout and OCR tasks
-  const modelId = 'gemini-3-pro-preview'; 
+  
+  // PRIMARY MODEL: Gemini 3 Pro (Best for OCR/Layout)
+  // FALLBACK MODEL: Gemini 2.5 Flash (Faster, higher limits)
+  let modelId = 'gemini-3-pro-preview'; 
 
-  onLog(`Initializing Gemini (${modelId})...`);
+  onLog(`Initializing analysis with ${modelId}...`);
   
   const parts: any[] = [];
 
-  // 1. Add Reference Library (Max 3 to save tokens but allow more context)
   if (referenceFiles.length > 0) {
     const MAX_REFS = 3; 
     const refsToSend = referenceFiles.slice(0, MAX_REFS);
-    
     onLog(`Processing ${refsToSend.length} reference templates...`);
     parts.push({ text: "REFERENCE LIBRARY FILES (Use these as templates if layout matches):" });
-    
     for (const refFile of refsToSend) {
       try {
         const refPart = await fileToPart(refFile);
@@ -428,7 +393,6 @@ export const analyzeDocument = async (
     }
   }
 
-  // 2. Add Target
   if (target.type === 'file') {
     onLog(`Processing target file: ${target.file.name}...`);
     parts.push({ text: "TARGET FILE TO ANALYZE:" });
@@ -445,7 +409,6 @@ export const analyzeDocument = async (
     parts.push({ text: truncatedJson });
   }
 
-  // 3. Add Instructions
   let promptText = "Analyze the target above. Provide the output JSON.";
   if (additionalInstructions && additionalInstructions.trim().length > 0) {
     promptText += `\n\nUSER EXTRA INSTRUCTIONS:\n${additionalInstructions}`;
@@ -456,9 +419,11 @@ export const analyzeDocument = async (
 
   let result;
   let retryCount = 0;
-  const maxRetries = 3;
+  let attempt = 0;
+  const MAX_TOTAL_ATTEMPTS = 6; 
 
-  while (retryCount < maxRetries) {
+  while (attempt < MAX_TOTAL_ATTEMPTS) {
+    attempt++;
     try {
       result = await ai.models.generateContent({
         model: modelId,
@@ -481,12 +446,28 @@ export const analyzeDocument = async (
       break; 
     } catch (error: any) {
       const isInternalError = error.message?.includes("500") || error.message?.includes("INTERNAL") || error.status === 500;
-      if (isInternalError) {
-        retryCount++;
-        if (retryCount >= maxRetries) throw error; 
-        const delay = 1000 * Math.pow(2, retryCount); 
-        onLog(`API Internal Error (500). Retrying attempt ${retryCount}/${maxRetries}...`);
-        await new Promise(resolve => setTimeout(resolve, delay));
+      // Handle 429 Quota Exceeded and 503 Service Unavailable
+      const isQuotaError = error.message?.includes("429") || error.status === 429 || error.message?.includes("quota") || error.message?.includes("RESOURCE_EXHAUSTED");
+      const isServiceUnavailable = error.message?.includes("503") || error.status === 503;
+      
+      console.warn(`Attempt ${attempt} failed with model ${modelId}. Error: ${error.message}`);
+
+      // FALLBACK LOGIC: If Pro fails due to Quota (429), switch to Flash immediately
+      if (isQuotaError && modelId === 'gemini-3-pro-preview') {
+          onLog("⚠️ Quota limit reached for Gemini 3 Pro. Switching to Gemini 2.5 Flash (faster, higher limits)...");
+          modelId = 'gemini-2.5-flash';
+          retryCount = 0; // Reset retries for new model
+          await new Promise(resolve => setTimeout(resolve, 1500)); // Brief cooling pause
+          continue;
+      }
+
+      if (isInternalError || isQuotaError || isServiceUnavailable) {
+         retryCount++;
+         if (retryCount > 3) throw error; // Give up after 3 retries on the SAME model
+         
+         const delay = 2000 * Math.pow(2, retryCount); // 4s, 8s, 16s
+         onLog(`API Error (${error.status || 'Network'}). Retrying attempt ${retryCount}/3 in ${delay/1000}s...`);
+         await new Promise(resolve => setTimeout(resolve, delay));
       } else {
         throw error; 
       }
@@ -494,11 +475,10 @@ export const analyzeDocument = async (
   }
 
   try {
-    onLog("Response received. Parsing JSON...");
+    onLog(`Response received from ${modelId}. Parsing JSON...`);
     
     let responseText = result?.text;
     
-    // Fallback: Manually join text parts if .text is empty
     if (!responseText && result?.candidates?.[0]?.content?.parts) {
        responseText = result.candidates[0].content.parts
          .map((p: any) => p.text || '')
@@ -515,14 +495,12 @@ export const analyzeDocument = async (
 
     const parsed = parseRobustJson(responseText);
       
-    // Relaxed check: Only error if BOTH codes are missing
     if (!parsed.pdfMakeCode.includes("function") && !parsed.excelJSCode.includes("function")) {
        if (parsed.pdfMakeCode.startsWith("//") && parsed.excelJSCode.startsWith("//")) {
            throw new Error("Incomplete JSON structure returned");
        }
     }
 
-    // Sanitize summary fields
     if (parsed.summary?.detectedTables) {
        if (!Array.isArray(parsed.summary.detectedTables.dimensions)) {
           const val = parsed.summary.detectedTables.dimensions;
@@ -535,7 +513,6 @@ export const analyzeDocument = async (
        parsed.summary.detectedTables = { count: 0, dimensions: [] };
     }
     
-    // FINAL SAFETY CHECK: Ensure extractedData is at least empty array if somehow undefined
     if (parsed.extractedData === undefined || parsed.extractedData === null) {
       parsed.extractedData = [];
     }
